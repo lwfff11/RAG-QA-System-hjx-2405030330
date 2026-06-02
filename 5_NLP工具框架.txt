@@ -1,0 +1,19 @@
+一、Python基础库
+- NLTK：经典NLP库，支持分词、标注、语料库处理。
+- spaCy：工业级NLP库，速度快、支持多语言。
+- Jieba：中文分词首选，支持精确/全/搜索引擎模式。
+- Gensim：主题建模（LDA）、词向量、文档相似度。
+
+二、深度学习框架
+- TensorFlow/Keras：适合构建CNN/RNN/Transformer模型。
+- PyTorch：动态图、易调试，研究与工业界主流。
+
+三、大模型与RAG框架
+- LangChain：构建RAG链、连接大模型与向量库。
+- LlamaIndex：数据连接与检索优化，适合知识库问答。
+- Ollama：本地部署DeepSeek、Qwen、Llama等开源大模型。
+
+四、向量数据库
+- Chroma：轻量级本地向量库，适合开发测试。
+- FAISS：Facebook开源，高速向量检索。
+- Pinecone：云端向量库，适合大规模生产环境。
