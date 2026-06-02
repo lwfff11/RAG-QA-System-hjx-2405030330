@@ -1,21 +1,52 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Virtual environment
 .env
-.venv
+.venv/
 venv/
 ENV/
+
+# Editor
 *.swp
 *.swo
 *~
 *.tmp
 .DS_Store
+.vscode/
+.idea/
+
+# Streamlit
 .streamlit/secrets.toml
+
+# Database
 chroma_db/
+*.sqlite3
+
+# Documents
 docs/
 uploaded_docs/
+temp_uploads/
+
+# Logs
 *.log
+
+# Build
 build/
 dist/
 *.spec
+
+# Large files
+OllamaSetup.exe
+*.exe
+*.msi
+
+# OS
+Thumbs.db
