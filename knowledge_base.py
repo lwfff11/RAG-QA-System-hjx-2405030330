@@ -1,122 +1,148 @@
 import os
-from typing import List
+from typing import List, Optional
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import InMemoryVectorStore
 from langchain_ollama import OllamaEmbeddings
 from langchain_core.documents import Document
 
 
 class KnowledgeBase:
-    def __init__(self, persist_directory: str = "./chroma_db"):
-        self.persist_directory = persist_directory
+    def __init__(
+        self,
+        embedding_model: str = "nomic-embed-text",
+        base_url: str = "http://localhost:11434",
+        chunk_size: int = 500,
+        chunk_overlap: int = 100,
+    ):
+        self.embedding_model = embedding_model
+        self.base_url = base_url
         self.embeddings = OllamaEmbeddings(
-            model="nomic-embed-text",
-            base_url="http://localhost:11434"
+            model=embedding_model,
+            base_url=base_url,
         )
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            length_function=len
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            length_function=len,
         )
         self.vectorstore = None
-        self._init_vectorstore()
-    
-    def _init_vectorstore(self):
-        if os.path.exists(self.persist_directory) and len(os.listdir(self.persist_directory)) > 0:
-            self.vectorstore = Chroma(
-                persist_directory=self.persist_directory,
-                embedding_function=self.embeddings
+
+    def _load_pptx(self, file_path: str) -> List[Document]:
+        from pptx import Presentation
+
+        prs = Presentation(file_path)
+        full_text = []
+        for slide_num, slide in enumerate(prs.slides, 1):
+            parts = []
+            for shape in slide.shapes:
+                if not shape.has_text_frame:
+                    continue
+                for paragraph in shape.text_frame.paragraphs:
+                    text = paragraph.text.strip()
+                    if text:
+                        parts.append(text)
+            if parts:
+                full_text.append(f"[Slide {slide_num}]\n" + "\n".join(parts))
+
+        if not full_text:
+            return []
+        return [
+            Document(
+                page_content="\n\n".join(full_text),
+                metadata={"source": os.path.basename(file_path)},
             )
-        else:
-            self.vectorstore = None
-    
+        ]
+
     def load_document(self, file_path: str) -> List[Document]:
         ext = os.path.splitext(file_path)[1].lower()
-        
-        if ext == '.pdf':
+        if ext == ".pdf":
             loader = PyPDFLoader(file_path)
-        elif ext == '.docx':
+        elif ext == ".docx":
             loader = Docx2txtLoader(file_path)
-        elif ext == '.txt':
-            loader = TextLoader(file_path, encoding='utf-8')
+        elif ext in [".txt", ".md", ".markdown"]:
+            loader = TextLoader(file_path, encoding="utf-8")
+        elif ext == ".pptx":
+            return self._load_pptx(file_path)
         else:
-            raise ValueError(f"不支持的文件格式: {ext}")
-        
-        documents = loader.load()
-        return documents
-    
+            raise ValueError(f"Unsupported file format: {ext}")
+
+        return loader.load()
+
     def add_documents(self, file_paths: List[str]) -> int:
         all_documents = []
-        
         for file_path in file_paths:
             try:
                 documents = self.load_document(file_path)
                 for doc in documents:
-                    doc.metadata['source'] = os.path.basename(file_path)
+                    doc.metadata["source"] = os.path.basename(file_path)
                 all_documents.extend(documents)
             except Exception as e:
-                print(f"加载文件 {file_path} 时出错: {str(e)}")
+                print(f"[KB] 加载文件 {file_path} 失败: {e}")
                 continue
-        
+
         if not all_documents:
             return 0
-        
+
         split_docs = self.text_splitter.split_documents(all_documents)
-        
+
         if self.vectorstore is None:
-            self.vectorstore = Chroma.from_documents(
+            self.vectorstore = InMemoryVectorStore.from_documents(
                 documents=split_docs,
                 embedding=self.embeddings,
-                persist_directory=self.persist_directory
             )
         else:
             self.vectorstore.add_documents(split_docs)
-        
+
         return len(split_docs)
-    
+
     def search(self, query: str, k: int = 3) -> List[Document]:
         if self.vectorstore is None:
             return []
-        
-        results = self.vectorstore.similarity_search(query, k=k)
-        return results
-    
+        return self.vectorstore.similarity_search(query, k=k)
+
     def get_retriever(self, k: int = 3):
         if self.vectorstore is None:
             return None
         return self.vectorstore.as_retriever(search_kwargs={"k": k})
-    
+
     def get_chunks_count(self) -> int:
         if self.vectorstore is None:
             return 0
-        return len(self.vectorstore.get()['ids'])
-    
+        try:
+            return len(self.vectorstore.store)
+        except Exception:
+            return 0
+
     def clear_database(self):
-        if os.path.exists(self.persist_directory):
-            import shutil
-            shutil.rmtree(self.persist_directory)
-            self.vectorstore = None
-    
+        self.vectorstore = None
+
     def get_sources(self) -> List[str]:
         if self.vectorstore is None:
             return []
-        ids = self.vectorstore.get()['ids']
-        if not ids:
+        try:
+            if hasattr(self.vectorstore, 'store'):
+                docs = self.vectorstore.store
+                sources = set()
+                for doc in docs.values():
+                    if isinstance(doc, dict):
+                        meta = doc.get('metadata') or {}
+                        if isinstance(meta, dict) and 'source' in meta:
+                            sources.add(meta['source'])
+                    elif hasattr(doc, 'metadata'):
+                        meta = doc.metadata
+                        if isinstance(meta, dict) and 'source' in meta:
+                            sources.add(meta['source'])
+                return list(sources)
             return []
-        metadatas = self.vectorstore.get()['metadatas']
-        sources = list(set([meta.get('source', 'unknown') for meta in metadatas]))
-        return sources
+        except Exception as e:
+            print(f"[KB] get_sources error: {e}")
+            return []
 
 
 def main():
-    print("=" * 50)
-    print("知识库测试")
-    print("=" * 50)
-    
     kb = KnowledgeBase()
-    print(f"当前知识库文本块数量: {kb.get_chunks_count()}")
-    print(f"当前知识库文档: {kb.get_sources()}")
+    print(f"chunks: {kb.get_chunks_count()}, sources: {kb.get_sources()}")
 
 
 if __name__ == "__main__":
